@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>面接用タイマー (30秒思考 + 1分回答)</title>
+    <!-- Tailwind CSSの読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* カスタムフォントとアニメーションの設定 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* bg-gray-100 */
+        }
+        .timer-circle {
+            transition: stroke-dashoffset 1s linear;
+        }
+        /* 状態に応じた色の変化をスムーズにするトランジション */
+        .color-transition {
+            transition: color 0.5s ease, border-color 0.5s ease;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center">
+
+    <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center">
+        <h1 class="text-2xl font-bold text-gray-800 mb-6">面接課題タイマー</h1>
+
+        <!-- 現在のフェーズを表示するエリア -->
+        <div id="phase-display" class="text-xl font-semibold text-gray-500 mb-4 h-8 color-transition">
+            待機中
+        </div>
+
+        <!-- タイマーの円形プログレスと残り時間表示 -->
+        <div class="relative w-64 h-64 mx-auto mb-8">
+            <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                <!-- 背景の円 -->
+                <circle cx="50" cy="50" r="45" fill="none" stroke="#e5e7eb" stroke-width="8"></circle>
+                <!-- プログレスを示す円 -->
+                <circle id="progress-circle" cx="50" cy="50" r="45" fill="none" stroke="#3b82f6" stroke-width="8" 
+                        stroke-dasharray="283" stroke-dashoffset="0" class="timer-circle"></circle>
+            </svg>
+            <!-- 時間のテキスト表示 (SVGの中央に配置) -->
+            <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
+                <span id="time-display" class="text-5xl font-mono font-bold text-gray-700 color-transition">00:00</span>
+            </div>
+        </div>
+
+        <!-- 操作ボタンエリア -->
+        <div class="flex justify-center space-x-4">
+            <button id="start-btn" class="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition-colors">
+                スタート
+            </button>
+            <button id="reset-btn" class="px-6 py-3 bg-gray-200 text-gray-700 font-semibold rounded-lg shadow-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-75 transition-colors">
+                リセット
+            </button>
+        </div>
+        
+        <!-- 説明テキスト -->
+        <p class="mt-6 text-sm text-gray-500">
+            スタートを押すと、<br>
+            <span class="font-bold text-blue-600">思考時間 (30秒)</span> → <span class="font-bold text-green-600">回答時間 (1分)</span><br>
+            の順で自動的に進みます。
+        </p>
+    </div>
+
+    <script>
+        // 定数の定義
+        const THINK_TIME = 30; // 思考時間 (秒)
+        const ANSWER_TIME = 60; // 回答時間 (秒)
+        const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * 45; // プログレス円の円周 (r=45)
+
+        // DOM要素の取得
+        const timeDisplay = document.getElementById('time-display');
+        const phaseDisplay = document.getElementById('phase-display');
+        const progressCircle = document.getElementById('progress-circle');
+        const startBtn = document.getElementById('start-btn');
+        const resetBtn = document.getElementById('reset-btn');
+
+        // 状態変数
+        let timerInterval;
+        let currentTime = 0;
+        let totalTimeForPhase = 0;
+        let currentPhase = 'IDLE'; // IDLE, THINKING, ANSWERING, FINISHED
+
+        // 時間を MM:SS フォーマットの文字列に変換する関数
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = (seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        // 画面の表示を更新する関数
+        function updateDisplay() {
+            timeDisplay.textContent = formatTime(currentTime);
+
+            // プログレスバーの更新
+            if (totalTimeForPhase > 0) {
+                // 経過時間の割合を計算 (1 -> 0 に減っていく)
+                const fraction = currentTime / totalTimeForPhase;
+                // stroke-dashoffset を計算して円弧の長さを調整
+                const offset = CIRCLE_CIRCUMFERENCE - (fraction * CIRCLE_CIRCUMFERENCE);
+                progressCircle.style.strokeDashoffset = offset;
+            } else {
+                progressCircle.style.strokeDashoffset = 0;
+            }
+
+            // フェーズごとの色とテキストの変更
+            switch (currentPhase) {
+                case 'IDLE':
+                    phaseDisplay.textContent = '待機中';
+                    phaseDisplay.className = 'text-xl font-semibold text-gray-500 mb-4 h-8 color-transition';
+                    timeDisplay.className = 'text-5xl font-mono font-bold text-gray-700 color-transition';
+                    progressCircle.setAttribute('stroke', '#3b82f6'); // default blue
+                    break;
+                case 'THINKING':
+                    phaseDisplay.textContent = '思考時間 (30秒)';
+                    phaseDisplay.className = 'text-xl font-bold text-blue-600 mb-4 h-8 color-transition animate-pulse';
+                    timeDisplay.className = 'text-5xl font-mono font-bold text-blue-600 color-transition';
+                    progressCircle.setAttribute('stroke', '#3b82f6'); // blue
+                    break;
+                case 'ANSWERING':
+                    phaseDisplay.textContent = '回答時間 (1分)';
+                    phaseDisplay.className = 'text-xl font-bold text-green-600 mb-4 h-8 color-transition animate-pulse';
+                    timeDisplay.className = 'text-5xl font-mono font-bold text-green-600 color-transition';
+                    progressCircle.setAttribute('stroke', '#10b981'); // green
+                    break;
+                case 'FINISHED':
+                    phaseDisplay.textContent = '終了';
+                    phaseDisplay.className = 'text-xl font-bold text-red-600 mb-4 h-8 color-transition';
+                    timeDisplay.className = 'text-5xl font-mono font-bold text-red-600 color-transition';
+                    progressCircle.setAttribute('stroke', '#ef4444'); // red
+                    progressCircle.style.strokeDashoffset = 0; // 終了時は円を空にする
+                    break;
+            }
+        }
+
+        // タイマーのカウントダウン処理
+        function tick() {
+            if (currentTime > 0) {
+                currentTime--;
+                updateDisplay();
+            } else {
+                // 現在のフェーズの時間が0になった場合の処理
+                clearInterval(timerInterval);
+                
+                if (currentPhase === 'THINKING') {
+                    // 思考時間が終わったら、回答時間を開始
+                    startAnswering();
+                } else if (currentPhase === 'ANSWERING') {
+                    // 回答時間が終わったら、終了状態へ
+                    finishTimer();
+                }
+            }
+        }
+
+        // 思考時間を開始する関数
+        function startThinking() {
+            currentPhase = 'THINKING';
+            currentTime = THINK_TIME;
+            totalTimeForPhase = THINK_TIME;
+            updateDisplay();
+            
+            // 少し遅延を入れて円形プログレスのアニメーションをリセットさせる
+            setTimeout(() => {
+                progressCircle.style.transition = 'stroke-dashoffset 1s linear';
+                timerInterval = setInterval(tick, 1000);
+            }, 50);
+            
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+
+        // 回答時間を開始する関数
+        function startAnswering() {
+            currentPhase = 'ANSWERING';
+            currentTime = ANSWER_TIME;
+            totalTimeForPhase = ANSWER_TIME;
+            
+            // 円のトランジションを一時的に切って即座に満タン状態にする
+            progressCircle.style.transition = 'none';
+            progressCircle.style.strokeDashoffset = 0;
+            
+            updateDisplay();
+
+            // 少し遅延を入れてトランジションを戻し、カウントダウン開始
+            setTimeout(() => {
+                progressCircle.style.transition = 'stroke-dashoffset 1s linear';
+                timerInterval = setInterval(tick, 1000);
+            }, 50);
+        }
+
+        // タイマーを終了状態にする関数
+        function finishTimer() {
+            currentPhase = 'FINISHED';
+            currentTime = 0;
+            totalTimeForPhase = 0;
+            updateDisplay();
+            
+            startBtn.disabled = false;
+            startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            startBtn.textContent = 'もう一度';
+        }
+
+        // タイマーを初期状態にリセットする関数
+        function resetTimer() {
+            clearInterval(timerInterval);
+            currentPhase = 'IDLE';
+            currentTime = 0;
+            totalTimeForPhase = 0;
+            
+            // 円のトランジションを一時的に切って即座にリセット
+            progressCircle.style.transition = 'none';
+            updateDisplay();
+            
+            startBtn.disabled = false;
+            startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            startBtn.textContent = 'スタート';
+        }
+
+        // ボタンのイベントリスナー設定
+        startBtn.addEventListener('click', () => {
+            if (currentPhase === 'IDLE' || currentPhase === 'FINISHED') {
+                startThinking();
+            }
+        });
+
+        resetBtn.addEventListener('click', resetTimer);
+
+        // 初期表示の設定
+        updateDisplay();
+    </script>
+</body>
+</html>
